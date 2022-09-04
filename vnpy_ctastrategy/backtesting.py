@@ -78,7 +78,7 @@ class BacktestingEngine:
 
         self.logs: list = []
 
-        self.daily_results: Dict[date, DailyResult] = {}
+        self.daily_results: Dict[date | datetime, DailyResult] = {}
         self.daily_df: DataFrame = None
 
     def clear_data(self) -> None:
@@ -214,10 +214,12 @@ class BacktestingEngine:
         ix: int = 0
 
         for ix, data in enumerate(self.history_data):
-            if self.datetime and data.datetime.day != self.datetime.day:
-                day_count += 1
-                if day_count >= self.days:
-                    break
+            if self.datetime:
+                if (self.interval == Interval.DAILY and data.datetime.day != self.datetime.day) \
+                        or (self.interval == Interval.MINUTE and data.datetime.minute != self.datetime.minute):
+                    day_count += 1
+                    if day_count >= self.days:
+                        break
 
             self.datetime = data.datetime
 
@@ -271,7 +273,10 @@ class BacktestingEngine:
 
         # Add trade data into daily reuslt.
         for trade in self.trades.values():
-            d: date = trade.datetime.date()
+            if self.interval == Interval.DAILY:
+                d: date = trade.datetime.date()
+            if self.interval == Interval.MINUTE:
+                d: datetime = trade.datetime
             daily_result: DailyResult = self.daily_results[d]
             daily_result.add_trade(trade)
 
@@ -298,7 +303,10 @@ class BacktestingEngine:
             for key, value in daily_result.__dict__.items():
                 results[key].append(value)
 
-        self.daily_df = DataFrame.from_dict(results).set_index("date")
+        df = DataFrame.from_dict(results)
+        if self.interval == Interval.MINUTE:
+            df["date"] = df["date"].dt.tz_convert(None)
+        self.daily_df = df
 
         self.output("逐日盯市盈亏计算完成")
         return self.daily_df
@@ -370,11 +378,13 @@ class BacktestingEngine:
             max_ddpercent = df["ddpercent"].min()
             max_drawdown_end = df["drawdown"].idxmin()
 
-            if isinstance(max_drawdown_end, date):
-                max_drawdown_start = df["balance"][:max_drawdown_end].idxmax()
-                max_drawdown_duration: int = (max_drawdown_end - max_drawdown_start).days
-            else:
-                max_drawdown_duration: int = 0
+            max_drawdown_duration: int = 0
+            if self.interval == Interval.DAILY and isinstance(max_drawdown_end, date):
+                    max_drawdown_start = df["balance"][:max_drawdown_end].idxmax()
+                    max_drawdown_duration: int = (max_drawdown_end - max_drawdown_start).days
+            if self.interval == Interval.MINUTE and isinstance(max_drawdown_end, datetime):
+                    max_drawdown_start = df["balance"][:max_drawdown_end].idxmax()
+                    max_drawdown_duration: int = (max_drawdown_end - max_drawdown_start).days
 
             total_net_pnl: float = df["net_pnl"].sum()
             daily_net_pnl: float = total_net_pnl / total_days
@@ -568,7 +578,10 @@ class BacktestingEngine:
 
     def update_daily_close(self, price: float) -> None:
         """"""
-        d: date = self.datetime.date()
+        if self.interval == Interval.DAILY:
+            d: date = self.datetime.date()
+        if self.interval == Interval.MINUTE:
+            d: datetime = self.datetime
 
         daily_result: Optional[DailyResult] = self.daily_results.get(d, None)
         if daily_result:
