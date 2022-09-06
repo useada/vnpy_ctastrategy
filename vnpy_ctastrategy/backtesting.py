@@ -306,7 +306,7 @@ class BacktestingEngine:
         df = DataFrame.from_dict(results)
         if self.interval == Interval.MINUTE:
             df["date"] = df["date"].dt.tz_convert(None)
-        self.daily_df = df
+        self.daily_df = df.set_index("date")
 
         self.output("逐日盯市盈亏计算完成")
         return self.daily_df
